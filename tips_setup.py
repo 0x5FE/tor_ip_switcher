@@ -1,81 +1,75 @@
-#! /usr/bin/env python3
-#
-# Configuration tool for tor_ip_switcher /etc/tor/torrc
-#
-# Usage: tips_setup.py <your_new_password>
-#
-# By Rupe 08.21.2018, updated 01.23.2022
+#!/usr/bin/env python3
+"""
+Configuration tool for tor_ip_switcher /etc/tor/torrc
+Usage: tips_setup.py <your_new_password>
+By Rupe 08.21.2018, updated 11.09.2023
+"""
 
-from os import devnull, geteuid
-from os.path import basename, isfile
-from subprocess import call, getoutput
-from sys import exit, argv, stderr, stdout
-from time import sleep
+import os
+import subprocess
+import sys
+import time
 
+TORRC_PATH = '/etc/tor/torrc'
 
-ControlHashedPassword = ''.join(
-    getoutput('tor --hash-password "%s"' % ''.join(argv[1:])).split()[-1:])
+def hash_password(password):
+    hashed_password = subprocess.getoutput(f'tor --hash-password "{password}"').split()[-1]
+    return hashed_password
 
-def controlPort_setup():
-  call(["sed", "-i", "/ControlPort /s/^#//", "/etc/tor/torrc"])
-  call(["sed", "-i", "/HashedControlPassword /s/^#//", "/etc/tor/torrc"])
-
-def controlHashed_password():
-  call([
-      "sed",
-      "-i",
-      "s/^HashedControlPassword 16:.*[A-Z0-9]/HashedControlPassword %s/" %
-      ControlHashedPassword,
-      "/etc/tor/torrc",
-  ])
+def enable_control_port():
+    try:
+        with open(TORRC_PATH, 'a') as torrc:
+            torrc.write("\nControlPort 9051\n")
+            torrc.write(f"HashedControlPassword {ControlHashedPassword}\n")
+        return True
+    except Exception as e:
+        print(f"Error enabling ControlPort: {e}")
+        return False
 
 def reload_tor_config():
-  if tor := getoutput('pidof tor'):
-    call(['kill', '-HUP', '%s' % tor], stderr=open(devnull, 'w'))
-    print("\n \033[92m[" + '\u2714' + "]\033[0m Tor Config: Reloaded")
-  else:
-    print("\n \033[91m[" + '\u2718' + "]\033[0m Tor Daemon: Not running")
-
+    try:
+        tor_pid = subprocess.getoutput('pidof tor')
+        if tor_pid:
+            subprocess.call(['kill', '-HUP', tor_pid])
+            print("\n[✓] Tor Config: Reloaded")
+            return True
+        else:
+            print("\n[✗] Tor Daemon: Not running")
+            return False
+    except Exception as e:
+        print(f"Error reloading Tor config: {e}")
+        return False
 
 if __name__ == '__main__':
-  if geteuid() != 0:
-    exit('Run as super user!')
-  if argv[1:] == list():
-    exit(" \n[!] Usage: %s <your_new_password>\n" % basename(__file__))
-  else:
+    if os.geteuid() != 0:
+        sys.exit('Run as super user!')
+
+    if len(sys.argv) != 2:
+        sys.exit("\n[!] Usage: %s <your_new_password>\n" % os.path.basename(__file__))
+
+    ControlHashedPassword = hash_password(sys.argv[1])
+
     try:
-      info = \
-      """
-      [\033[93m\u003F\033[0m] Gathering torrc config information [\033[93m\u003F\033[0m]
-      """
-      if isfile('/etc/tor/torrc'):
-        if 'HashedControlPassword' not in open('/etc/tor/torrc').read():
-          exit(
-              "\033[91m[!]\033[0m HashedControlPassword not in /etc/tor/torrc.")
-        for i in info:
-          sleep(.02)
-          stdout.write(i)
-          stdout.flush()
-        controlPort_setup()
-        controlHashed_password()
-        reload_tor_config()
-        print(
-            " \033[92m["
-            + "\u2714"
-            + "]\033[0m ControlPort 9051: Enabled\n", "\033[92m["
-            + "\u2714"
-            + "]\033[0m HashedControlPassword: Enabled\n", "\033[92m["
-            + "\u2714"
-            + "]\033[0m /etc/tor/torrc: Updated successfully\n", "\033[92m["
-            + "\u2719"
-            + "]\033[0m Password set to: \033[92m"
-            + "%s" % "".join(argv[1:])
-            + "\033[0m"
-            + "\n", "\033[92m["
-            + "\u2719"
-            + "]\033[0m HashedControlPassword %s\n" % ControlHashedPassword
-        )
-      else:
-        exit("\033[91m[!]\033[0m /etc/tor/torrc missing.")
+        print("\n[?] Gathering torrc config information [?]")
+        
+        if os.path.isfile(TORRC_PATH):
+            with open(TORRC_PATH, 'r') as torrc:
+                torrc_content = torrc.read()
+                if 'HashedControlPassword' not in torrc_content:
+                    if enable_control_port():
+                        if reload_tor_config():
+                            print(
+                                " [✓] ControlPort 9051: Enabled\n",
+                                " [✓] HashedControlPassword: Enabled\n",
+                                " [✓] /etc/tor/torrc: Updated successfully\n",
+                                " [✗] Password set to: ", sys.argv[1], "\n",
+                                " [✗] HashedControlPassword ", ControlHashedPassword, "\n")
+                    else:
+                        sys.exit("\n[✗] Unable to enable ControlPort and HashedControlPassword\n")
+                else:
+                    print("\n[✓] ControlPort and HashedControlPassword already configured\n")
+        else:
+            sys.exit("\n[✗] /etc/tor/torrc missing\n")
+
     except Exception as err:
-      print(err)
+        print(err)
